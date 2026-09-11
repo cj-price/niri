@@ -470,6 +470,10 @@ impl<W: LayoutElement> Tile<W> {
                 .is_some_and(|anim| anim.is_between_workspaces)
     }
 
+    pub fn is_above_fullscreen(&self) -> bool {
+        self.window.rules().above_fullscreen == Some(true)
+    }
+
     pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
         let rules = self.window.rules();
         let animated_tile_size = self.animated_tile_size();

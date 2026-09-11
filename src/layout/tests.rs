@@ -348,10 +348,12 @@ prop_compose! {
     fn arbitrary_rules()(
         focus_ring in arbitrary_focus_ring(),
         border in arbitrary_border(),
+        above_fullscreen in prop::option::of(any::<bool>()),
     ) -> ResolvedWindowRules {
         ResolvedWindowRules {
             focus_ring,
             border,
+            above_fullscreen,
             ..ResolvedWindowRules::default()
         }
     }

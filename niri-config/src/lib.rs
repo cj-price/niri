@@ -916,6 +916,7 @@ mod tests {
                 default-column-display "tabbed"
                 default-floating-position x=100 y=-200 relative-to="bottom-left"
                 on-xdg-activate "ignore"
+                above-fullscreen true
 
                 focus-ring {
                     off
@@ -1910,6 +1911,9 @@ mod tests {
                     ),
                     scroll_factor: None,
                     tiled_state: None,
+                    above_fullscreen: Some(
+                        true,
+                    ),
                     background_effect: BackgroundEffectRule {
                         xray: None,
                         blur: None,

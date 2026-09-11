@@ -341,12 +341,21 @@ impl Window {
         self.surface.attach(Some(&buffer), 0, 0);
     }
 
+    pub fn attach_new_buffer_with_color(&self, r: u32, g: u32, b: u32, a: u32) {
+        let buffer = self.spbm.create_u32_rgba_buffer(r, g, b, a, &self.qh, ());
+        self.surface.attach(Some(&buffer), 0, 0);
+    }
+
     pub fn attach_null(&self) {
         self.surface.attach(None, 0, 0);
     }
 
     pub fn set_size(&self, w: u16, h: u16) {
         self.viewport.set_destination(i32::from(w), i32::from(h));
+    }
+
+    pub fn set_app_id(&self, app_id: &str) {
+        self.xdg_toplevel.set_app_id(app_id.to_owned());
     }
 
     pub fn set_fullscreen(&self, output: Option<&WlOutput>) {

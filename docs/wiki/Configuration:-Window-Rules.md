@@ -59,6 +59,7 @@ window-rule {
     default-floating-position x=100 y=200 relative-to="bottom-left"
     scroll-factor 0.75
     on-xdg-activate "focus"
+    above-fullscreen true
 
     focus-ring {
         // off
@@ -913,6 +914,37 @@ layout {
 window-rule {
     geometry-corner-radius 12
     clip-to-geometry true
+}
+```
+
+#### `above-fullscreen`
+
+<sup>Since: next release</sup>
+
+Keep this window drawn on top of a focused fullscreen window, rather than hiding it.
+
+Normally, when a fullscreen window is focused and not animating, it covers the floating windows and the top layer-shell layer.
+Set `above-fullscreen true` to exempt a specific window from that: it stays visible, stays clickable, and is drawn above the fullscreen window and above the top layer-shell layer.
+
+This rule only affects [floating](./Floating-Windows.md) windows, since a window in the scrolling layout is in a different column from the fullscreen one and won't be on screen anyway.
+Pair it with [`open-floating`](#open-floating) to make sure the window lands in the floating layout.
+
+The window is not pinned above other floating windows; the regular floating stacking order still applies between visible floating windows.
+It remains below the `overlay` layer-shell layer and is never shown over the session lock screen.
+Rules such as [`block-out-from`](#block-out-from) still apply.
+
+Matching an app ID or title is not a security boundary: these values are supplied by the application itself.
+
+This is meant for overlays that need to stay visible over a fullscreen game or video, such as a chat or stats HUD.
+For a bar or widget that should do the same, put it on the `overlay` layer-shell layer instead.
+
+```kdl
+// Keep a game overlay visible over fullscreen windows.
+window-rule {
+    match app-id="^my-overlay$"
+
+    open-floating true
+    above-fullscreen true
 }
 ```
 

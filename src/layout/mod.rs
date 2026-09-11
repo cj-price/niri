@@ -4782,6 +4782,7 @@ impl<W: LayoutElement> Layout<W> {
                 };
                 let tile_pos = move_.tile_render_location(zoom);
                 let tile_size = move_.tile.tile_size();
+                let above_fullscreen = move_.tile.is_above_fullscreen();
 
                 let output = move_.output.clone();
                 let pointer_pos_within_output = move_.pointer_pos_within_output;
@@ -4795,7 +4796,14 @@ impl<W: LayoutElement> Layout<W> {
                 let ws = &mut mon.workspaces[idx];
 
                 let tile_pos = tile_pos - ws_geo.loc;
-                ws.start_close_animation_for_tile(renderer, snapshot, tile_size, tile_pos, blocker);
+                ws.start_close_animation_for_tile(
+                    renderer,
+                    snapshot,
+                    tile_size,
+                    tile_pos,
+                    blocker,
+                    above_fullscreen,
+                );
                 return;
             }
         }

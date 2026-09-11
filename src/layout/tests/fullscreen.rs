@@ -657,3 +657,101 @@ fn removing_only_fullscreen_tile_updates_view_offset() {
     // FIXME: currently, removing a tile doesn't cause the view offset to update.
     assert_snapshot!(layout.active_workspace().unwrap().scrolling().view_pos(), @"0");
 }
+
+fn set_up_above_fullscreen(above_fullscreen: Option<bool>) -> Layout<TestWindow> {
+    check_ops([
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams {
+                is_floating: true,
+                rules: Some(ResolvedWindowRules {
+                    above_fullscreen,
+                    ..ResolvedWindowRules::default()
+                }),
+                ..TestWindowParams::new(2)
+            },
+        },
+        Op::FullscreenWindow(1),
+        Op::Communicate(1),
+        Op::Communicate(2),
+        Op::FocusWindow(1),
+        Op::CompleteAnimations,
+    ])
+}
+
+#[track_caller]
+fn floating_tile_visible(layout: &Layout<TestWindow>, id: usize) -> bool {
+    layout
+        .active_workspace()
+        .unwrap()
+        .tiles_with_render_positions()
+        .find_map(|(tile, _, visible)| (*tile.window().id() == id).then_some(visible))
+        .unwrap()
+}
+
+#[track_caller]
+fn floating_tile_center(layout: &Layout<TestWindow>, id: usize) -> Point<f64, Logical> {
+    layout
+        .active_workspace()
+        .unwrap()
+        .tiles_with_render_positions()
+        .find_map(|(tile, pos, _)| {
+            (*tile.window().id() == id).then(|| pos + tile.tile_size().to_point().downscale(2.))
+        })
+        .unwrap()
+}
+
+#[test]
+fn floating_window_hidden_behind_fullscreen_by_default() {
+    let layout = set_up_above_fullscreen(None);
+
+    assert!(
+        layout.active_workspace().unwrap().render_above_top_layer(),
+        "the fullscreen window should be covering the top layer"
+    );
+    assert!(!floating_tile_visible(&layout, 2));
+
+    let center = floating_tile_center(&layout, 2);
+    let (win, _) = layout
+        .active_workspace()
+        .unwrap()
+        .window_under(center)
+        .unwrap();
+    assert_eq!(
+        *win.id(),
+        1,
+        "clicks should fall through to the fullscreen window"
+    );
+}
+
+#[test]
+fn above_fullscreen_floating_window_stays_visible() {
+    let layout = set_up_above_fullscreen(Some(true));
+
+    assert!(
+        layout.active_workspace().unwrap().render_above_top_layer(),
+        "the fullscreen window should be covering the top layer"
+    );
+    assert!(floating_tile_visible(&layout, 2));
+
+    let center = floating_tile_center(&layout, 2);
+    let (win, _) = layout
+        .active_workspace()
+        .unwrap()
+        .window_under(center)
+        .unwrap();
+    assert_eq!(
+        *win.id(),
+        2,
+        "the above-fullscreen window should take clicks"
+    );
+}
+
+#[test]
+fn above_fullscreen_false_behaves_like_default() {
+    let layout = set_up_above_fullscreen(Some(false));
+    assert!(!floating_tile_visible(&layout, 2));
+}
