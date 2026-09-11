@@ -1595,7 +1595,8 @@ impl<W: LayoutElement> Workspace<W> {
 
         let floating = self.floating.tiles_with_render_positions();
         let visible = self.is_floating_visible();
-        let floating = floating.map(move |(tile, pos)| (tile, pos, visible));
+        let floating =
+            floating.map(move |(tile, pos)| (tile, pos, visible || tile.is_above_fullscreen()));
 
         floating.chain(scrolling)
     }
@@ -1654,15 +1655,21 @@ impl<W: LayoutElement> Workspace<W> {
         layer: RenderLayer,
         push: &mut dyn FnMut(WorkspaceRenderElement<R>),
     ) {
-        if !self.is_floating_visible() && layer.is_normal() {
+        let only_above_fullscreen = !self.is_floating_visible() && layer.is_normal();
+        if only_above_fullscreen && !self.floating.has_above_fullscreen_windows() {
             return;
         }
 
         let view_rect = Rectangle::from_size(self.view_size);
-        self.floating
-            .render(ctx, xray_pos, view_rect, focus_ring, layer, &mut |elem| {
-                push(elem.into())
-            });
+        self.floating.render(
+            ctx,
+            xray_pos,
+            view_rect,
+            focus_ring,
+            layer,
+            only_above_fullscreen,
+            &mut |elem| push(elem.into()),
+        );
     }
 
     pub fn render_shadow<R: NiriRenderer>(
@@ -1744,6 +1751,7 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn start_close_animation_for_tile(
         &mut self,
         renderer: &mut GlesRenderer,
@@ -1751,9 +1759,16 @@ impl<W: LayoutElement> Workspace<W> {
         tile_size: Size<f64, Logical>,
         tile_pos: Point<f64, Logical>,
         blocker: TransactionBlocker,
+        above_fullscreen: bool,
     ) {
-        self.floating
-            .start_close_animation_for_tile(renderer, snapshot, tile_size, tile_pos, blocker);
+        self.floating.start_close_animation_for_tile(
+            renderer,
+            snapshot,
+            tile_size,
+            tile_pos,
+            blocker,
+            above_fullscreen,
+        );
     }
 
     pub fn start_open_animation(&mut self, id: &W::Id) -> bool {
@@ -1762,14 +1777,14 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<(&W, HitType)> {
         // This logic is consistent with tiles_with_render_positions().
-        if self.is_floating_visible() {
-            if let Some(rv) = self
-                .floating
-                .tiles_with_render_positions()
-                .find_map(|(tile, tile_pos)| HitType::hit_tile(tile, tile_pos, pos))
-            {
-                return Some(rv);
-            }
+        let visible = self.is_floating_visible();
+        if let Some(rv) = self
+            .floating
+            .tiles_with_render_positions()
+            .filter(|(tile, _)| visible || tile.is_above_fullscreen())
+            .find_map(|(tile, tile_pos)| HitType::hit_tile(tile, tile_pos, pos))
+        {
+            return Some(rv);
         }
 
         self.scrolling.window_under(pos)

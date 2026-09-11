@@ -52,7 +52,8 @@ pub struct FloatingSpace<W: LayoutElement> {
     interactive_resize: Option<InteractiveResize<W>>,
 
     /// Windows in the closing animation.
-    closing_windows: Vec<ClosingWindow>,
+    // Retain the above-fullscreen rule after the corresponding tile is removed.
+    closing_windows: Vec<(ClosingWindow, bool)>,
 
     /// View size for this space.
     view_size: Size<f64, Logical>,
@@ -252,7 +253,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
             tile.advance_animations();
         }
 
-        self.closing_windows.retain_mut(|closing| {
+        self.closing_windows.retain_mut(|(closing, _)| {
             closing.advance_animations();
             closing.are_animations_ongoing()
         });
@@ -573,7 +574,15 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
         let tile_size = tile.tile_size();
 
-        self.start_close_animation_for_tile(renderer, snapshot, tile_size, tile_pos, blocker);
+        let above_fullscreen = tile.is_above_fullscreen();
+        self.start_close_animation_for_tile(
+            renderer,
+            snapshot,
+            tile_size,
+            tile_pos,
+            blocker,
+            above_fullscreen,
+        );
     }
 
     pub fn activate_window_without_raising(&mut self, id: &W::Id) -> bool {
@@ -606,6 +615,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         self.data.insert(to_idx, data);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn start_close_animation_for_tile(
         &mut self,
         renderer: &mut GlesRenderer,
@@ -613,6 +623,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         tile_size: Size<f64, Logical>,
         tile_pos: Point<f64, Logical>,
         blocker: TransactionBlocker,
+        above_fullscreen: bool,
     ) {
         let anim = Animation::new(
             self.clock.clone(),
@@ -634,7 +645,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         );
         match res {
             Ok(closing) => {
-                self.closing_windows.push(closing);
+                self.closing_windows.push((closing, above_fullscreen));
             }
             Err(err) => {
                 warn!("error creating a closing window animation: {err:?}");
@@ -1070,6 +1081,12 @@ impl<W: LayoutElement> FloatingSpace<W> {
         true
     }
 
+    pub fn has_above_fullscreen_windows(&self) -> bool {
+        self.tiles.iter().any(Tile::is_above_fullscreen)
+            || self.closing_windows.iter().any(|(_, above)| *above)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub fn render<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
@@ -1077,6 +1094,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         view_rect: Rectangle<f64, Logical>,
         focus_ring: bool,
         layer: RenderLayer,
+        only_above_fullscreen: bool,
         push: &mut dyn FnMut(FloatingSpaceRenderElement<R>),
     ) {
         let scale = Scale::from(self.scale);
@@ -1085,7 +1103,10 @@ impl<W: LayoutElement> FloatingSpace<W> {
         //
         // FIXME: I guess this should rather preserve the stacking order when the window is closed.
         if layer.is_normal() {
-            for closing in self.closing_windows.iter().rev() {
+            for (closing, above_fullscreen) in self.closing_windows.iter().rev() {
+                if only_above_fullscreen && !above_fullscreen {
+                    continue;
+                }
                 let elem = closing.render(ctx.as_gles(), view_rect, scale);
                 push(elem.into());
             }
@@ -1094,6 +1115,10 @@ impl<W: LayoutElement> FloatingSpace<W> {
         for (tile, tile_pos) in self.tiles_with_render_positions() {
             // Skip tiles belonging to a different render layer.
             if layer.is_normal() == tile.is_moving_between_workspaces() {
+                continue;
+            }
+
+            if only_above_fullscreen && !tile.is_above_fullscreen() {
                 continue;
             }
 

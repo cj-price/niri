@@ -487,6 +487,10 @@ impl<W: LayoutElement> Tile<W> {
                 .is_some_and(|anim| anim.is_between_workspaces)
     }
 
+    pub fn is_above_fullscreen(&self) -> bool {
+        self.window.rules().above_fullscreen == Some(true)
+    }
+
     // Ring visibility is distinct from activation: inactive workspaces still show
     // their selected window's ring, using its inactive color.
     pub fn update_render_elements(
