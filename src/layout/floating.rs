@@ -269,6 +269,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
     pub fn update_render_elements(
         &mut self,
         is_active: bool,
+        focus_ring: bool,
         view_rect: Rectangle<f64, Logical>,
         layer: RenderLayer,
     ) {
@@ -284,7 +285,11 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
             let mut tile_view_rect = view_rect;
             tile_view_rect.loc -= offset + tile.render_offset();
-            tile.update_render_elements(is_active, tile_view_rect);
+            tile.update_render_elements(
+                is_active,
+                focus_ring && Some(id) == active.as_ref(),
+                tile_view_rect,
+            );
         }
     }
 
@@ -1086,15 +1091,13 @@ impl<W: LayoutElement> FloatingSpace<W> {
             }
         }
 
-        let active = self.active_window_id.clone();
         for (tile, tile_pos) in self.tiles_with_render_positions() {
             // Skip tiles belonging to a different render layer.
             if layer.is_normal() == tile.is_moving_between_workspaces() {
                 continue;
             }
 
-            // For the active tile, draw the focus ring.
-            let focus_ring = focus_ring && Some(tile.window().id()) == active.as_ref();
+            // Per-tile visibility includes rings that are still fading out.
 
             let xray_pos = xray_pos.offset(tile_pos);
             tile.render(ctx.r(), tile_pos, xray_pos, focus_ring, &mut |elem| {

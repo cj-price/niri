@@ -40,6 +40,32 @@ impl Shadow {
         scale: f64,
         alpha: f32,
     ) {
+        let color = self.color(is_active);
+        self.update_render_elements_with_color(win_size, color, radius, scale, alpha);
+    }
+
+    pub fn is_on(&self) -> bool {
+        self.config.on
+    }
+
+    pub fn color(&self, is_active: bool) -> niri_config::Color {
+        if is_active {
+            self.config.color
+        } else {
+            self.config
+                .inactive_color
+                .unwrap_or(self.config.color * 0.75)
+        }
+    }
+
+    pub fn update_render_elements_with_color(
+        &mut self,
+        win_size: Size<f64, Logical>,
+        color: niri_config::Color,
+        radius: CornerRadius,
+        scale: f64,
+        alpha: f32,
+    ) {
         let ceil = |logical: f64| (logical * scale).ceil() / scale;
 
         // All of this stuff should end up aligned to physical pixels because:
@@ -72,15 +98,6 @@ impl Shadow {
         let radius = win_radius.expanded_by(spread as f32);
 
         let shader_size = box_size + Size::from((width, width)).upscale(2.);
-
-        let color = if is_active {
-            self.config.color
-        } else {
-            // Default to slightly more transparent.
-            self.config
-                .inactive_color
-                .unwrap_or(self.config.color * 0.75)
-        };
 
         let shader_geo = Rectangle::new(Point::from((-width, -width)), shader_size);
 
@@ -172,6 +189,16 @@ impl Shadow {
             return;
         }
 
+        self.render_fading(renderer, location, push);
+    }
+
+    /// Keep drawing a disabled shadow until its opacity transition finishes.
+    pub fn render_fading(
+        &self,
+        renderer: &mut impl NiriRenderer,
+        location: Point<f64, Logical>,
+        push: &mut dyn FnMut(ShadowRenderElement),
+    ) {
         let has_shadow_shader = ShadowRenderElement::has_shader(renderer);
         if !has_shadow_shader {
             return;

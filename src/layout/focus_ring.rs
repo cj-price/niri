@@ -225,6 +225,16 @@ impl FocusRing {
             return;
         }
 
+        self.render_fading(renderer, location, push);
+    }
+
+    /// Render a fading ring even when its configuration has just been disabled.
+    pub fn render_fading(
+        &self,
+        renderer: &mut impl NiriRenderer,
+        location: Point<f64, Logical>,
+        push: &mut dyn FnMut(FocusRingRenderElement),
+    ) {
         let border_width = -self.locations[0].y;
 
         // If drawing as a border with width = 0, then there's nothing to draw.

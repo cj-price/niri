@@ -19,6 +19,7 @@ pub struct Animations {
     pub screenshot_ui_open: ScreenshotUiOpenAnim,
     pub overview_open_close: OverviewOpenCloseAnim,
     pub recent_windows_close: RecentWindowsCloseAnim,
+    pub decoration_change: DecorationChangeAnim,
 }
 
 impl Default for Animations {
@@ -37,6 +38,7 @@ impl Default for Animations {
             screenshot_ui_open: Default::default(),
             overview_open_close: Default::default(),
             recent_windows_close: Default::default(),
+            decoration_change: Default::default(),
         }
     }
 }
@@ -71,6 +73,8 @@ pub struct AnimationsPart {
     pub overview_open_close: Option<OverviewOpenCloseAnim>,
     #[knuffel(child)]
     pub recent_windows_close: Option<RecentWindowsCloseAnim>,
+    #[knuffel(child)]
+    pub decoration_change: Option<DecorationChangeAnim>,
 }
 
 impl MergeWith<AnimationsPart> for Animations {
@@ -97,6 +101,7 @@ impl MergeWith<AnimationsPart> for Animations {
             screenshot_ui_open,
             overview_open_close,
             recent_windows_close,
+            decoration_change,
         );
     }
 }
@@ -323,6 +328,35 @@ impl Default for RecentWindowsCloseAnim {
                 epsilon: 0.001,
             }),
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DecorationChangeAnim(pub Animation);
+
+impl Default for DecorationChangeAnim {
+    fn default() -> Self {
+        Self(Animation {
+            off: false,
+            kind: Kind::Easing(EasingParams {
+                duration_ms: 150,
+                curve: Curve::EaseOutQuad,
+            }),
+        })
+    }
+}
+
+impl<S: knuffel::traits::ErrorSpan> knuffel::Decode<S> for DecorationChangeAnim {
+    fn decode_node(
+        node: &knuffel::ast::SpannedNode<S>,
+        ctx: &mut knuffel::decode::Context<S>,
+    ) -> Result<Self, DecodeError<S>> {
+        Ok(Self(Animation::decode_node(
+            node,
+            ctx,
+            Self::default().0,
+            |_, _| Ok(false),
+        )?))
     }
 }
 

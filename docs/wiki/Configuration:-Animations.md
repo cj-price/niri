@@ -16,6 +16,11 @@ animations {
 
     // Individual animations.
 
+    decoration-change {
+        duration-ms 150
+        curve "ease-out-quad"
+    }
+
     workspace-switch {
         spring damping-ratio=1.0 stiffness=1000 epsilon=0.0001
     }
@@ -439,6 +444,31 @@ animations {
     }
 }
 ```
+
+#### `decoration-change`
+
+<sup>Since: next release</sup>
+
+Focus changes fade between the old and new focus rings and transition window-shadow
+colors by default. Use `decoration-change { off; }` to restore immediate changes.
+
+Controls focus-ring visibility fades, window-shadow visibility fades, and transitions
+between active and inactive window-shadow colors. Enabling or disabling a focus ring
+or window shadow through configuration or window rules also fades it in or out.
+Layer-surface and workspace shadows are unaffected.
+
+```kdl
+animations {
+    decoration-change {
+        duration-ms 150
+        curve "ease-out-quad"
+    }
+}
+```
+
+Use `decoration-change { off; }` to make these transitions immediate.
+Interrupted transitions continue from the currently displayed opacity or shadow color.
+Focus-ring colors and decoration geometry changes remain immediate.
 
 ### Synchronized Animations
 

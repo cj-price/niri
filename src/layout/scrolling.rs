@@ -426,7 +426,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             || !self.closing_windows.is_empty()
     }
 
-    pub fn update_render_elements(&mut self, is_active: bool, layer: RenderLayer) {
+    pub fn update_render_elements(
+        &mut self,
+        is_active: bool,
+        focus_ring: bool,
+        layer: RenderLayer,
+    ) {
         let view_pos = Point::from((self.view_pos(), 0.));
         let view_size = self.view_size;
         let active_idx = self.active_column_idx;
@@ -440,7 +445,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             let col_off = Point::from((col_x, 0.));
             let col_pos = view_pos - col_off - col.render_offset();
             let view_rect = Rectangle::new(col_pos, view_size);
-            col.update_render_elements(is_active, view_rect);
+            col.update_render_elements(is_active, focus_ring && col_idx == active_idx, view_rect);
         }
     }
 
@@ -2966,13 +2971,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             return;
         }
 
-        let mut first = true;
-
         // This matches self.tiles_with_render_positions().
         for (col, col_pos) in self.columns_with_render_positions() {
             // Skip columns belonging to a different render layer.
             if layer.is_normal() == col.is_moving_between_workspaces() {
-                first = false;
                 continue;
             }
 
@@ -2990,9 +2992,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
                 // And now the drawing logic.
 
-                // For the active tile (which comes first), draw the focus ring.
-                let focus_ring = focus_ring && first;
-                first = false;
+                // Visibility is animated per tile; allow the previous ring to fade out.
 
                 // In the scrolling layout, we currently use visible only for hidden tabs in the
                 // tabbed mode. We want to animate their opacity when going in and out of tabbed
@@ -4180,14 +4180,23 @@ impl<W: LayoutElement> Column<W> {
                 .any(|tile| tile.is_moving_between_workspaces())
     }
 
-    pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
+    pub fn update_render_elements(
+        &mut self,
+        is_active: bool,
+        focus_ring: bool,
+        view_rect: Rectangle<f64, Logical>,
+    ) {
         let active_idx = self.active_tile_idx;
         for (tile_idx, (tile, tile_off)) in self.tiles_mut().enumerate() {
             let is_active = is_active && tile_idx == active_idx;
 
             let mut tile_view_rect = view_rect;
             tile_view_rect.loc -= tile_off + tile.render_offset();
-            tile.update_render_elements(is_active, tile_view_rect);
+            tile.update_render_elements(
+                is_active,
+                focus_ring && tile_idx == active_idx,
+                tile_view_rect,
+            );
         }
 
         let config = self.tab_indicator.config();

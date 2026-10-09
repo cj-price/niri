@@ -8,6 +8,7 @@ use smithay::backend::renderer::element::{Element, Kind};
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::utils::{Logical, Point, Rectangle, Scale, Size};
 
+use super::decoration_animation::DecorationAnimation;
 use super::focus_ring::{FocusRing, FocusRingRenderElement};
 use super::opening_window::{OpenAnimation, OpeningWindowRenderElement};
 use super::shadow::Shadow;
@@ -46,9 +47,14 @@ pub struct Tile<W: LayoutElement> {
 
     /// The focus ring around the window.
     focus_ring: FocusRing,
+    /// Ring visibility, independent of window opacity and active/inactive color.
+    focus_ring_fade: DecorationAnimation,
 
     /// The shadow around the window.
     shadow: Shadow,
+    shadow_fade: DecorationAnimation,
+    /// Premultiplied RGBA channels, so transparent colors interpolate correctly.
+    shadow_color: [DecorationAnimation; 4],
 
     /// This tile's current sizing mode.
     ///
@@ -196,6 +202,9 @@ impl<W: LayoutElement> Tile<W> {
             window,
             border: FocusRing::new(border_config.into()),
             focus_ring: FocusRing::new(focus_ring_config),
+            focus_ring_fade: Default::default(),
+            shadow_fade: Default::default(),
+            shadow_color: Default::default(),
             shadow: Shadow::new(shadow_config),
             sizing_mode,
             fullscreen_backdrop: SolidColorBuffer::new((0., 0.), [0., 0., 0., 1.]),
@@ -415,6 +424,11 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn advance_animations(&mut self) {
+        self.focus_ring_fade.advance();
+        self.shadow_fade.advance();
+        for channel in &mut self.shadow_color {
+            channel.advance();
+        }
         if let Some(open) = &mut self.open_animation {
             if open.is_done() {
                 self.open_animation = None;
@@ -450,7 +464,10 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn are_transitions_ongoing(&self) -> bool {
-        self.open_animation.is_some()
+        self.focus_ring_fade.ongoing()
+            || self.shadow_fade.ongoing()
+            || self.shadow_color.iter().any(DecorationAnimation::ongoing)
+            || self.open_animation.is_some()
             || self.resize_animation.is_some()
             || self.move_x_animation.is_some()
             || self.move_y_animation.is_some()
@@ -470,7 +487,33 @@ impl<W: LayoutElement> Tile<W> {
                 .is_some_and(|anim| anim.is_between_workspaces)
     }
 
-    pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
+    // Ring visibility is distinct from activation: inactive workspaces still show
+    // their selected window's ring, using its inactive color.
+    pub fn update_render_elements(
+        &mut self,
+        is_active: bool,
+        focus_ring: bool,
+        view_rect: Rectangle<f64, Logical>,
+    ) {
+        let config = self.options.animations.decoration_change.0;
+        let ring_alpha = self.focus_ring_fade.update(
+            f64::from(focus_ring && !self.focus_ring.is_off()),
+            &self.clock,
+            config,
+        ) as f32;
+        let shadow_alpha =
+            self.shadow_fade
+                .update(f64::from(self.shadow.is_on()), &self.clock, config) as f32;
+        // Keep colors current without scheduling invisible redraws when shadows
+        // are disabled. Preserve color transitions throughout a visible fade-out.
+        let mut color_config = config;
+        color_config.off |= !self.shadow.is_on() && shadow_alpha == 0.;
+        let target_color = self.shadow.color(is_active).to_array_premul();
+        let color = std::array::from_fn(|i| {
+            self.shadow_color[i].update(f64::from(target_color[i]), &self.clock, color_config)
+                as f32
+        });
+        let color = niri_config::Color::from_array_premul(color);
         let rules = self.window.rules();
         let animated_tile_size = self.animated_tile_size();
         let expanded_progress = self.expanded_progress();
@@ -525,12 +568,12 @@ impl<W: LayoutElement> Tile<W> {
                 .geometry_corner_radius()
                 .scaled_by(1. - expanded_progress as f32)
         };
-        self.shadow.update_render_elements(
+        self.shadow.update_render_elements_with_color(
             animated_tile_size,
-            is_active,
+            color,
             radius,
             self.scale,
-            1. - expanded_progress as f32,
+            shadow_alpha * (1. - expanded_progress as f32),
         );
 
         let draw_focus_ring_with_background = if self.border.is_off() {
@@ -547,7 +590,7 @@ impl<W: LayoutElement> Tile<W> {
             view_rect,
             radius,
             self.scale,
-            1. - expanded_progress as f32,
+            ring_alpha * (1. - expanded_progress as f32),
         );
 
         self.fullscreen_backdrop.resize(animated_tile_size);
@@ -1329,14 +1372,14 @@ impl<W: LayoutElement> Tile<W> {
         // being outside the monitor or obscured by a solid colored bar, but it is visible under
         // semitransparent bars in maximized state (which is a bit weird) and in the overview (also
         // a bit weird).
-        if focus_ring && expanded_progress < 1. {
+        if focus_ring && expanded_progress < 1. && self.focus_ring_fade.value() > 0. {
             self.focus_ring
-                .render(ctx.renderer, location, &mut |elem| push(elem.into()));
+                .render_fading(ctx.renderer, location, &mut |elem| push(elem.into()));
         }
 
-        if expanded_progress < 1. {
+        if expanded_progress < 1. && self.shadow_fade.value() > 0. {
             self.shadow
-                .render(ctx.renderer, location, &mut |elem| push(elem.into()));
+                .render_fading(ctx.renderer, location, &mut |elem| push(elem.into()));
         }
 
         let surface_anim_scale = animated_window_size / window_size;

@@ -680,6 +680,21 @@ mod tests {
     }
 
     #[test]
+    fn decoration_change_animation() {
+        let config =
+            do_parse(r#"animations { decoration-change { duration-ms 230; curve "linear"; }; }"#);
+        assert_eq!(
+            config.animations.decoration_change.0.kind,
+            animations::Kind::Easing(animations::EasingParams {
+                duration_ms: 230,
+                curve: animations::Curve::Linear,
+            })
+        );
+        let config = do_parse("animations { decoration-change { off; }; }");
+        assert!(config.animations.decoration_change.0.off);
+    }
+
+    #[test]
     fn parse() {
         let parsed = do_parse(
             r##"
@@ -1666,6 +1681,17 @@ mod tests {
                                 damping_ratio: 1.0,
                                 stiffness: 800,
                                 epsilon: 0.001,
+                            },
+                        ),
+                    },
+                ),
+                decoration_change: DecorationChangeAnim(
+                    Animation {
+                        off: false,
+                        kind: Easing(
+                            EasingParams {
+                                duration_ms: 150,
+                                curve: EaseOutQuad,
                             },
                         ),
                     },

@@ -22,6 +22,93 @@ fn format_tiles(layout: &Layout<TestWindow>) -> String {
     buf
 }
 
+#[test]
+fn decoration_focus_and_config_changes_schedule_frames() {
+    let mut options = make_options();
+    options.animations.window_movement.0.off = true;
+    options.animations.horizontal_view_movement.0.off = true;
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams::new(1),
+            },
+            Op::AddWindow {
+                params: TestWindowParams::new(2),
+            },
+            Op::CompleteAnimations,
+        ],
+    );
+    layout.update_render_elements(None);
+    assert!(!layout.are_animations_ongoing(None));
+
+    Op::FocusColumnLeft.apply(&mut layout);
+    layout.update_render_elements(None);
+    assert!(layout.are_animations_ongoing(None));
+    Op::AdvanceAnimations { msec_delta: 200 }.apply(&mut layout);
+    layout.update_render_elements(None);
+    assert!(!layout.are_animations_ongoing(None));
+
+    let mut config = niri_config::Config::default();
+    config.layout.focus_ring.off = true;
+    config.layout.shadow.on = true;
+    layout.update_config(&config);
+    layout.update_render_elements(None);
+    assert!(layout.are_animations_ongoing(None));
+    Op::CompleteAnimations.apply(&mut layout);
+    layout.update_render_elements(None);
+    assert!(!layout.are_animations_ongoing(None));
+}
+
+#[test]
+fn disabled_shadows_do_not_animate_focus_changes() {
+    for shadows_on in [false, true] {
+        let mut options = make_options();
+        options.layout.focus_ring.off = true;
+        options.layout.shadow.on = shadows_on;
+        options.animations.window_movement.0.off = true;
+        options.animations.horizontal_view_movement.0.off = true;
+        let mut layout = check_ops_with_options(
+            options,
+            [
+                Op::AddOutput(1),
+                Op::AddWindow {
+                    params: TestWindowParams::new(1),
+                },
+                Op::AddWindow {
+                    params: TestWindowParams::new(2),
+                },
+                Op::CompleteAnimations,
+            ],
+        );
+        layout.update_render_elements(None);
+        assert!(!layout.are_animations_ongoing(None));
+        Op::FocusColumnLeft.apply(&mut layout);
+        layout.update_render_elements(None);
+        assert_eq!(layout.are_animations_ongoing(None), shadows_on);
+
+        if shadows_on {
+            // Disabling shadows mid-color-transition must still animate the fade-out.
+            let mut config = niri_config::Config {
+                layout: layout.options.layout.clone(),
+                animations: layout.options.animations.clone(),
+                ..Default::default()
+            };
+            config.layout.shadow.on = false;
+            layout.update_config(&config);
+            layout.update_render_elements(None);
+            assert!(layout.are_animations_ongoing(None));
+            Op::AdvanceAnimations { msec_delta: 75 }.apply(&mut layout);
+            layout.update_render_elements(None);
+            assert!(layout.are_animations_ongoing(None));
+            Op::AdvanceAnimations { msec_delta: 125 }.apply(&mut layout);
+            layout.update_render_elements(None);
+            assert!(!layout.are_animations_ongoing(None));
+        }
+    }
+}
+
 fn make_options() -> Options {
     const LINEAR: Kind = Kind::Easing(EasingParams {
         duration_ms: 1000,
