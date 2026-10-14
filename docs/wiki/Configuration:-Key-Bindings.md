@@ -81,6 +81,38 @@ binds {
 
 This is mostly useful for the scroll bindings.
 
+### Release Bindings
+
+<sup>Since: next release</sup>
+
+Set `on-release=true` to run an action when a keyboard key is released instead of pressed.
+You can bind both phases of the same shortcut, for example for hold-to-talk dictation:
+
+```kdl
+binds {
+    Mod+Space repeat=false { spawn "dictationctl" "start"; }
+    Mod+Space on-release=true { spawn "dictationctl" "stop"; }
+}
+```
+
+Here, `dictationctl` is a placeholder for your dictation application's control command.
+The release binding is selected when Space is pressed with Mod held, then runs once when that same keyboard's Space key is released.
+Releasing Mod first does not trigger or cancel it, and changing the keyboard layout or reloading the config does not change the already selected action.
+Pressing Space without Mod and adding Mod later does not activate this binding.
+
+A release-only binding also consumes the initial press: neither event is sent to the focused application.
+Shortcut inhibition is checked on press; an inhibited press does not arm a release action.
+Lock-screen and screenshot restrictions still apply when executing the action.
+Accessibility grabs can also consume input before bindings handle it.
+
+Release bindings never repeat; `repeat=true` is an error, while `repeat=false` is optional.
+Press and release bindings have independent cooldowns, but avoid cooldowns on hold-to-talk stop commands.
+Currently, `on-release` is supported only for keyboard keys, not mouse buttons, scrolling, or tablet buttons.
+
+Pending release actions are **cancelled, not executed**, when the keyboard is removed, the session locks or becomes inactive, niri suspends or switches VT, or a nested niri window loses focus.
+Do not rely on key-up alone as a guarantee that microphone recording will stop: the dictation application needs its own cancellation/fail-safe policy.
+Separately spawned start and stop commands also run asynchronously; the dictation application should serialize their requests and handle repeated stop requests safely.
+
 ### Scroll Bindings
 
 You can bind mouse wheel scroll ticks using the following syntax.

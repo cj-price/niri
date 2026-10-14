@@ -24,6 +24,7 @@ pub struct Bind {
     pub key: Key,
     pub action: Action,
     pub repeat: bool,
+    pub on_release: bool,
     pub cooldown: Option<Duration>,
     pub allow_when_locked: bool,
     pub allow_inhibiting: bool,
@@ -773,7 +774,7 @@ where
     ) -> Result<Self, DecodeError<S>> {
         expect_only_children(node, ctx);
 
-        let mut seen_keys: HashMap<Key, &knuffel::ast::SpannedNode<S>> = HashMap::new();
+        let mut seen_keys: HashMap<(Key, bool), &knuffel::ast::SpannedNode<S>> = HashMap::new();
 
         let mut binds = Vec::new();
 
@@ -783,7 +784,7 @@ where
                     ctx.emit_error(e);
                 }
                 Ok(bind) => {
-                    match seen_keys.entry(bind.key) {
+                    match seen_keys.entry((bind.key, bind.on_release)) {
                         Entry::Occupied(entry) => {
                             // Even though it's technically incorrect, we use
                             // `DecodeError::Missing` here because it labels the bind with
@@ -841,7 +842,8 @@ where
             .parse::<Key>()
             .map_err(|e| DecodeError::conversion(&node.node_name, e.wrap_err("invalid keybind")))?;
 
-        let mut repeat = true;
+        let mut repeat = None;
+        let mut on_release = false;
         let mut cooldown = None;
         let mut allow_when_locked = false;
         let mut allow_when_locked_node = None;
@@ -850,7 +852,10 @@ where
         for (name, val) in &node.properties {
             match &***name {
                 "repeat" => {
-                    repeat = knuffel::traits::DecodeScalar::decode(val, ctx)?;
+                    repeat = Some(knuffel::traits::DecodeScalar::decode(val, ctx)?);
+                }
+                "on-release" => {
+                    on_release = knuffel::traits::DecodeScalar::decode(val, ctx)?;
                 }
                 "cooldown-ms" => {
                     cooldown = Some(Duration::from_millis(
@@ -877,6 +882,23 @@ where
             }
         }
 
+        if on_release {
+            if !matches!(key.trigger, Trigger::Keysym(_)) {
+                ctx.emit_error(DecodeError::unexpected(
+                    &node.node_name,
+                    "release binding",
+                    "on-release is only supported for keyboard bindings",
+                ));
+            }
+            if repeat == Some(true) {
+                ctx.emit_error(DecodeError::unexpected(
+                    &node.node_name,
+                    "release binding",
+                    "on-release bindings cannot repeat",
+                ));
+            }
+        }
+        let repeat = repeat.unwrap_or(!on_release);
         let mut children = node.children();
 
         // If the action is invalid but the key is fine, we still want to return something.
@@ -885,7 +907,8 @@ where
         let dummy = Self {
             key,
             action: Action::Spawn(vec![]),
-            repeat: true,
+            repeat,
+            on_release,
             cooldown: None,
             allow_when_locked: false,
             allow_inhibiting: true,
@@ -922,6 +945,7 @@ where
                         key,
                         action,
                         repeat,
+                        on_release,
                         cooldown,
                         allow_when_locked,
                         allow_inhibiting,

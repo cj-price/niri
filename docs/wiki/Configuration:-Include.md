@@ -202,7 +202,11 @@ include "laptop.kdl"
 
 #### Binds
 
-`binds` will override previously-defined conflicting keys:
+`binds` will override previously-defined conflicting keys.
+Press and [release bindings](./Configuration:-Key-Bindings.md#release-bindings) are independent: overriding a press binding preserves the release binding for the same shortcut, and vice versa.
+Within one `binds` block, defining the same key and phase twice is an error.
+
+For example:
 
 ```kdl
 // binds.kdl

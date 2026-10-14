@@ -16,7 +16,7 @@ use calloop::futures::Scheduler;
 use niri_config::debug::PreviewRender;
 use niri_config::output::MaxBpc;
 use niri_config::{
-    Config, FloatOrInt, Key, Modifiers, OutputName, TrackLayout, WarpMouseToFocusMode,
+    Bind, Config, FloatOrInt, Key, Modifiers, OutputName, TrackLayout, WarpMouseToFocusMode,
     WorkspaceReference, Xkb,
 };
 use smithay::backend::allocator::Fourcc;
@@ -324,11 +324,13 @@ pub struct Niri {
     pub single_pixel_buffer_state: SinglePixelBufferState,
 
     pub seat: Seat<State>,
-    /// Scancodes of the keys to suppress.
-    pub suppressed_keys: HashSet<Keycode>,
+    /// Scancodes of the keys to suppress, by backend device ID.
+    pub suppressed_keys: HashMap<String, HashSet<Keycode>>,
+    /// Release bindings selected on press, by backend device ID and scancode.
+    pub release_binds: HashMap<String, HashMap<Keycode, Bind>>,
     /// Button codes of the mouse buttons to suppress.
     pub suppressed_buttons: HashSet<u32>,
-    pub bind_cooldown_timers: HashMap<Key, RegistrationToken>,
+    pub bind_cooldown_timers: HashMap<(Key, bool), RegistrationToken>,
     pub bind_repeat_timer: Option<RegistrationToken>,
     pub keyboard_focus: KeyboardFocus,
     pub layer_shell_on_demand_focus: Option<LayerSurface>,
@@ -2577,7 +2579,8 @@ impl Niri {
             ext_data_control_state,
             popups: PopupManager::default(),
             popup_grab: None,
-            suppressed_keys: HashSet::new(),
+            suppressed_keys: HashMap::new(),
+            release_binds: HashMap::new(),
             suppressed_buttons: HashSet::new(),
             bind_cooldown_timers: HashMap::new(),
             bind_repeat_timer: Option::default(),
@@ -5849,6 +5852,16 @@ impl Niri {
         Ok(())
     }
 
+    /// Forget held shortcuts when the backend can no longer deliver their releases.
+    /// Cancellation must not execute arbitrary key-up actions.
+    pub fn cancel_keyboard_binds(&mut self) {
+        self.release_binds.clear();
+        self.suppressed_keys.clear();
+        if let Some(token) = self.bind_repeat_timer.take() {
+            self.event_loop.remove(token);
+        }
+    }
+
     pub fn is_locked(&self) -> bool {
         match self.lock_state {
             LockState::Unlocked | LockState::WaitingForSurfaces { .. } => false,
@@ -5886,6 +5899,8 @@ impl Niri {
         }
 
         info!("locking session");
+        // Keep suppression until key-up, but do not replay pre-lock release actions.
+        self.release_binds.clear();
 
         if self.output_state.is_empty() {
             // There are no outputs, lock the session right away.
@@ -5948,6 +5963,7 @@ impl Niri {
                 deadline_token,
             } => {
                 self.event_loop.remove(deadline_token);
+                self.release_binds.clear();
 
                 self.screenshot_ui.close();
                 self.cursor_manager
