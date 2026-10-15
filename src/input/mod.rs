@@ -1,6 +1,6 @@
 use std::any::Any;
 use std::collections::hash_map::Entry;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use calloop::timer::{TimeoutAction, Timer};
@@ -60,6 +60,8 @@ pub mod click_grab;
 pub mod move_grab;
 pub mod pick_color_grab;
 pub mod pick_window_grab;
+#[cfg(test)]
+mod release_tests;
 pub mod resize_grab;
 pub mod scroll_swipe_gesture;
 pub mod scroll_tracker;
@@ -273,6 +275,13 @@ impl State {
     }
 
     fn on_device_removed(&mut self, device: impl Device) {
+        self.niri.release_binds.remove(&device.id());
+        self.niri.suppressed_keys.remove(&device.id());
+        if device.has_capability(DeviceCapability::Keyboard) {
+            if let Some(token) = self.niri.bind_repeat_timer.take() {
+                self.niri.event_loop.remove(token);
+            }
+        }
         if device.has_capability(DeviceCapability::TabletTool) {
             let tablet_seat = self.niri.seat.tablet_seat();
 
@@ -419,6 +428,7 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let time = Event::time(&event);
         let pressed = event.state() == KeyState::Pressed;
+        let device_id = event.device().id();
 
         // Stop bind key repeat on any release. This won't work 100% correctly in cases like:
         // 1. Press Mod
@@ -453,6 +463,11 @@ impl State {
             );
             if block != KbMonBlock::Pass {
                 *consumed_by_a11y = true;
+                if !pressed {
+                    if let Some(binds) = self.niri.release_binds.get_mut(&device_id) {
+                        binds.remove(&event.key_code());
+                    }
+                }
             }
             // The accessibility modifier first press must not change XKB state, so we return
             // early here.
@@ -480,6 +495,15 @@ impl State {
                 // don't handle them.
                 #[cfg(feature = "dbus")]
                 if block != KbMonBlock::Pass {
+                    if !pressed
+                        && this
+                            .niri
+                            .suppressed_keys
+                            .get_mut(&device_id)
+                            .is_some_and(|keys| keys.remove(&key_code))
+                    {
+                        return FilterResult::Intercept(None);
+                    }
                     // HACK: there's a slight problem with this code. Here we filter out keys
                     // consumed by accessibility from getting sent to the Wayland client. However,
                     // the Wayland client can still receive these keys from the wl_keyboard
@@ -521,7 +545,11 @@ impl State {
                     }
 
                     // Don't send this press to any clients.
-                    this.niri.suppressed_keys.insert(key_code);
+                    this.niri
+                        .suppressed_keys
+                        .entry(device_id.clone())
+                        .or_default()
+                        .insert(key_code);
                     return FilterResult::Intercept(None);
                 }
 
@@ -529,12 +557,8 @@ impl State {
                 // UI (which will also transfer the focus to the current MRU UI selection).
                 if this.niri.window_mru_ui.is_open() && !pressed && modifiers.is_empty() {
                     this.do_action(Action::MruConfirm, false);
-
-                    if this.niri.suppressed_keys.remove(&key_code) {
-                        return FilterResult::Intercept(None);
-                    } else {
-                        return FilterResult::Forward;
-                    }
+                    // Continue through release handling: another held key may have an
+                    // armed release binding, even though the MRU UI now owns the focus.
                 }
 
                 if pressed && raw == Some(Keysym::Escape) {
@@ -545,7 +569,11 @@ impl State {
                         .unwrap_or(false)
                     {
                         pointer.unset_grab(this, serial, time);
-                        this.niri.suppressed_keys.insert(key_code);
+                        this.niri
+                            .suppressed_keys
+                            .entry(device_id.clone())
+                            .or_default()
+                            .insert(key_code);
                         return FilterResult::Intercept(None);
                     }
                 }
@@ -555,12 +583,20 @@ impl State {
                 }
 
                 let res = {
+                    let is_locked = this.niri.is_locked();
                     let config = this.niri.config.borrow();
                     let bindings =
                         make_binds_iter(&config, &mut this.niri.window_mru_ui, modifiers);
 
                     should_intercept_key(
-                        &mut this.niri.suppressed_keys,
+                        this.niri
+                            .suppressed_keys
+                            .entry(device_id.clone())
+                            .or_default(),
+                        this.niri
+                            .release_binds
+                            .entry(device_id.clone())
+                            .or_default(),
                         bindings,
                         mod_key,
                         key_code,
@@ -571,6 +607,7 @@ impl State {
                         &this.niri.screenshot_ui,
                         this.niri.config.borrow().input.disable_power_key_handling,
                         is_inhibiting_shortcuts,
+                        is_locked,
                     )
                 };
 
@@ -579,7 +616,11 @@ impl State {
                     if this.niri.keyboard_focus.is_overview() && pressed {
                         if let Some(bind) = raw.and_then(|raw| hardcoded_overview_bind(raw, *mods))
                         {
-                            this.niri.suppressed_keys.insert(key_code);
+                            this.niri
+                                .suppressed_keys
+                                .entry(device_id.clone())
+                                .or_default()
+                                .insert(key_code);
                             return FilterResult::Intercept(Some(bind));
                         }
                     }
@@ -595,17 +636,16 @@ impl State {
             return;
         };
 
-        if !pressed {
-            return;
+        // Start repeat first so actions that cancel input (e.g. suspend) can
+        // cancel this timer too, instead of leaving a newly started timer behind.
+        if pressed {
+            self.start_key_repeat(bind.clone());
         }
-
-        self.handle_bind(bind.clone());
-
-        self.start_key_repeat(bind);
+        self.handle_bind(bind);
     }
 
     fn start_key_repeat(&mut self, bind: Bind) {
-        if !bind.repeat {
+        if !bind.repeat || bind.on_release {
             return;
         }
 
@@ -671,7 +711,11 @@ impl State {
             return;
         }
 
-        match self.niri.bind_cooldown_timers.entry(bind.key) {
+        match self
+            .niri
+            .bind_cooldown_timers
+            .entry((bind.key, bind.on_release))
+        {
             // The bind is on cooldown.
             Entry::Occupied(_) => (),
             Entry::Vacant(entry) => {
@@ -680,7 +724,12 @@ impl State {
                     .niri
                     .event_loop
                     .insert_source(timer, move |_, _, state| {
-                        if state.niri.bind_cooldown_timers.remove(&bind.key).is_none() {
+                        if state
+                            .niri
+                            .bind_cooldown_timers
+                            .remove(&(bind.key, bind.on_release))
+                            .is_none()
+                        {
                             error!("bind cooldown timer entry disappeared");
                         }
                         TimeoutAction::Drop
@@ -715,12 +764,12 @@ impl State {
             Action::ChangeVt(vt) => {
                 self.backend.change_vt(vt);
                 // Changing VT may not deliver the key releases, so clear the state.
-                self.niri.suppressed_keys.clear();
+                self.niri.cancel_keyboard_binds();
             }
             Action::Suspend => {
                 self.backend.suspend();
                 // Suspend may not deliver the key releases, so clear the state.
-                self.niri.suppressed_keys.clear();
+                self.niri.cancel_keyboard_binds();
             }
             Action::PowerOffMonitors => {
                 self.niri.deactivate_monitors(&mut self.backend);
@@ -3164,6 +3213,7 @@ impl State {
                                 },
                                 action: Action::FocusColumnLeftUnderMouse,
                                 repeat: true,
+                                on_release: false,
                                 cooldown: None,
                                 allow_when_locked: false,
                                 allow_inhibiting: false,
@@ -3176,6 +3226,7 @@ impl State {
                                 },
                                 action: Action::FocusColumnRightUnderMouse,
                                 repeat: true,
+                                on_release: false,
                                 cooldown: None,
                                 allow_when_locked: false,
                                 allow_inhibiting: false,
@@ -3233,6 +3284,7 @@ impl State {
                             },
                             action: Action::FocusWorkspaceUpUnderMouse,
                             repeat: true,
+                            on_release: false,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
                             allow_inhibiting: false,
@@ -3245,6 +3297,7 @@ impl State {
                             },
                             action: Action::FocusWorkspaceDownUnderMouse,
                             repeat: true,
+                            on_release: false,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
                             allow_inhibiting: false,
@@ -3259,6 +3312,7 @@ impl State {
                             },
                             action: Action::FocusColumnLeftUnderMouse,
                             repeat: true,
+                            on_release: false,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
                             allow_inhibiting: false,
@@ -3271,6 +3325,7 @@ impl State {
                             },
                             action: Action::FocusColumnRightUnderMouse,
                             repeat: true,
+                            on_release: false,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
                             allow_inhibiting: false,
@@ -4522,7 +4577,8 @@ impl State {
 #[allow(clippy::too_many_arguments)]
 fn should_intercept_key<'a>(
     suppressed_keys: &mut HashSet<Keycode>,
-    bindings: impl IntoIterator<Item = &'a Bind>,
+    release_binds: &mut HashMap<Keycode, Bind>,
+    bindings: impl Iterator<Item = &'a Bind> + Clone,
     mod_key: ModKey,
     key_code: Keycode,
     modified: Keysym,
@@ -4532,16 +4588,45 @@ fn should_intercept_key<'a>(
     screenshot_ui: &ScreenshotUi,
     disable_power_key_handling: bool,
     is_inhibiting_shortcuts: bool,
+    is_locked: bool,
 ) -> FilterResult<Option<Bind>> {
-    // Actions are only triggered on presses, release of the key
-    // shouldn't try to intercept anything unless we have marked
-    // the key to suppress.
-    if !pressed && !suppressed_keys.contains(&key_code) {
-        return FilterResult::Forward;
+    if !pressed {
+        // Use the binding selected on press, not the current modifiers, layout,
+        // focus, or config. Remove it before dispatch so it can only run once.
+        let bind = release_binds.remove(&key_code).filter(|bind| {
+            (!is_locked || bind.allow_when_locked || allowed_when_locked(&bind.action))
+                && (!screenshot_ui.is_open() || allowed_during_screenshot(&bind.action))
+        });
+        return if suppressed_keys.remove(&key_code) {
+            FilterResult::Intercept(bind)
+        } else {
+            FilterResult::Forward
+        };
     }
 
+    // Backends normally deduplicate presses, but do not overwrite an armed
+    // release or launch its paired press action again if they do not.
+    if release_binds.contains_key(&key_code) {
+        return FilterResult::Intercept(None);
+    }
+
+    let mut release_bind = raw
+        .and_then(|raw| {
+            find_configured_bind(
+                bindings.clone().filter(|bind| bind.on_release),
+                mod_key,
+                Trigger::Keysym(raw),
+                mods,
+            )
+        })
+        .filter(|bind| {
+            (!is_inhibiting_shortcuts || !bind.allow_inhibiting)
+                && (!is_locked || bind.allow_when_locked || allowed_when_locked(&bind.action))
+                && (!screenshot_ui.is_open() || allowed_during_screenshot(&bind.action))
+        });
+
     let mut final_bind = find_bind(
-        bindings,
+        bindings.filter(|bind| !bind.on_release),
         mod_key,
         modified,
         raw,
@@ -4549,18 +4634,17 @@ fn should_intercept_key<'a>(
         disable_power_key_handling,
     );
 
+    // Hardcoded VT/power handling takes precedence over both configured phases.
+    if hardcoded_key_action(modified, disable_power_key_handling).is_some() {
+        release_bind = None;
+    }
+
     // Allow only a subset of compositor actions while the screenshot UI is open, since the user
     // cannot see the screen.
     if screenshot_ui.is_open() {
-        let mut use_screenshot_ui_action = true;
+        final_bind = final_bind.filter(|bind| allowed_during_screenshot(&bind.action));
 
-        if let Some(bind) = &final_bind {
-            if allowed_during_screenshot(&bind.action) {
-                use_screenshot_ui_action = false;
-            }
-        }
-
-        if use_screenshot_ui_action {
+        if final_bind.is_none() && release_bind.is_none() {
             if let Some(raw) = raw {
                 final_bind = screenshot_ui.action(raw, mods).map(|action| Bind {
                     key: Key {
@@ -4570,6 +4654,7 @@ fn should_intercept_key<'a>(
                     },
                     action,
                     repeat: true,
+                    on_release: false,
                     cooldown: None,
                     allow_when_locked: false,
                     // The screenshot UI owns the focus anyway, so this doesn't really matter.
@@ -4582,25 +4667,15 @@ fn should_intercept_key<'a>(
         }
     }
 
-    match (final_bind, pressed) {
-        (Some(bind), true) => {
-            if is_inhibiting_shortcuts && bind.allow_inhibiting {
-                FilterResult::Forward
-            } else {
-                suppressed_keys.insert(key_code);
-                FilterResult::Intercept(Some(bind))
-            }
+    let final_bind = final_bind.filter(|bind| !is_inhibiting_shortcuts || !bind.allow_inhibiting);
+    if final_bind.is_some() || release_bind.is_some() {
+        suppressed_keys.insert(key_code);
+        if let Some(bind) = release_bind {
+            release_binds.insert(key_code, bind);
         }
-        (_, false) => {
-            // By this point, we know that the key was suppressed on press. Even if we're inhibiting
-            // shortcuts, we should still suppress the release.
-            // But we don't need to check for shortcuts inhibition here, because
-            // if it was inhibited on press (forwarded to the client), it wouldn't be suppressed,
-            // so the release would already have been forwarded at the start of this function.
-            suppressed_keys.remove(&key_code);
-            FilterResult::Intercept(None)
-        }
-        (None, true) => FilterResult::Forward,
+        FilterResult::Intercept(final_bind)
+    } else {
+        FilterResult::Forward
     }
 }
 
@@ -4612,20 +4687,7 @@ fn find_bind<'a>(
     mods: ModifiersState,
     disable_power_key_handling: bool,
 ) -> Option<Bind> {
-    use keysyms::*;
-
-    // Handle hardcoded binds.
-    #[allow(non_upper_case_globals)] // wat
-    let hardcoded_action = match modified.raw() {
-        modified @ KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12 => {
-            let vt = (modified - KEY_XF86Switch_VT_1 + 1) as i32;
-            Some(Action::ChangeVt(vt))
-        }
-        KEY_XF86PowerOff if !disable_power_key_handling => Some(Action::Suspend),
-        _ => None,
-    };
-
-    if let Some(action) = hardcoded_action {
+    if let Some(action) = hardcoded_key_action(modified, disable_power_key_handling) {
         return Some(Bind {
             key: Key {
                 // Not entirely correct but it doesn't matter in how we currently use it.
@@ -4634,6 +4696,7 @@ fn find_bind<'a>(
             },
             action,
             repeat: true,
+            on_release: false,
             cooldown: None,
             allow_when_locked: false,
             // In a worst-case scenario, the user has no way to unlock the compositor and a
@@ -4648,6 +4711,20 @@ fn find_bind<'a>(
 
     let trigger = Trigger::Keysym(raw?);
     find_configured_bind(bindings, mod_key, trigger, mods)
+}
+
+fn hardcoded_key_action(modified: Keysym, disable_power_key_handling: bool) -> Option<Action> {
+    use keysyms::*;
+
+    #[allow(non_upper_case_globals)]
+    match modified.raw() {
+        modified @ KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12 => {
+            let vt = (modified - KEY_XF86Switch_VT_1 + 1) as i32;
+            Some(Action::ChangeVt(vt))
+        }
+        KEY_XF86PowerOff if !disable_power_key_handling => Some(Action::Suspend),
+        _ => None,
+    }
 }
 
 fn find_configured_bind<'a>(
@@ -4877,6 +4954,7 @@ fn hardcoded_overview_bind(raw: Keysym, mods: ModifiersState) -> Option<Bind> {
         },
         action,
         repeat,
+        on_release: false,
         cooldown: None,
         allow_when_locked: false,
         allow_inhibiting: false,
@@ -5295,7 +5373,7 @@ fn make_binds_iter<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     use super::*;
     use crate::animation::Clock;
@@ -5310,6 +5388,7 @@ mod tests {
             },
             action: Action::CloseWindow,
             repeat: true,
+            on_release: false,
             cooldown: None,
             allow_when_locked: false,
             allow_inhibiting: true,
@@ -5322,6 +5401,7 @@ mod tests {
         let screenshot_ui = ScreenshotUi::new(Clock::default(), Default::default());
         let disable_power_key_handling = false;
         let is_inhibiting_shortcuts = Cell::new(false);
+        let release_binds = RefCell::new(HashMap::new());
 
         // The key_code we pick is arbitrary, the only thing
         // that matters is that they are different between cases.
@@ -5330,7 +5410,8 @@ mod tests {
         let close_key_event = |suppr: &mut HashSet<Keycode>, mods: ModifiersState, pressed| {
             should_intercept_key(
                 suppr,
-                &bindings.0,
+                &mut release_binds.borrow_mut(),
+                bindings.0.iter(),
                 comp_mod,
                 close_key_code,
                 close_keysym,
@@ -5340,6 +5421,7 @@ mod tests {
                 &screenshot_ui,
                 disable_power_key_handling,
                 is_inhibiting_shortcuts.get(),
+                false,
             )
         };
 
@@ -5347,7 +5429,8 @@ mod tests {
         let none_key_event = |suppr: &mut HashSet<Keycode>, mods: ModifiersState, pressed| {
             should_intercept_key(
                 suppr,
-                &bindings.0,
+                &mut release_binds.borrow_mut(),
+                bindings.0.iter(),
                 comp_mod,
                 Keycode::from(Keysym::l.raw() + 8),
                 Keysym::l,
@@ -5357,6 +5440,7 @@ mod tests {
                 &screenshot_ui,
                 disable_power_key_handling,
                 is_inhibiting_shortcuts.get(),
+                false,
             )
         };
 
@@ -5496,6 +5580,7 @@ mod tests {
                 },
                 action: Action::CloseWindow,
                 repeat: true,
+                on_release: false,
                 cooldown: None,
                 allow_when_locked: false,
                 allow_inhibiting: true,
@@ -5508,6 +5593,7 @@ mod tests {
                 },
                 action: Action::FocusColumnLeft,
                 repeat: true,
+                on_release: false,
                 cooldown: None,
                 allow_when_locked: false,
                 allow_inhibiting: true,
@@ -5520,6 +5606,7 @@ mod tests {
                 },
                 action: Action::FocusWindowDown,
                 repeat: true,
+                on_release: false,
                 cooldown: None,
                 allow_when_locked: false,
                 allow_inhibiting: true,
@@ -5532,6 +5619,7 @@ mod tests {
                 },
                 action: Action::FocusWindowUp,
                 repeat: true,
+                on_release: false,
                 cooldown: None,
                 allow_when_locked: false,
                 allow_inhibiting: true,
@@ -5544,6 +5632,7 @@ mod tests {
                 },
                 action: Action::FocusColumnRight,
                 repeat: true,
+                on_release: false,
                 cooldown: None,
                 allow_when_locked: false,
                 allow_inhibiting: true,

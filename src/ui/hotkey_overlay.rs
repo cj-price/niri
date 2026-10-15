@@ -132,8 +132,8 @@ impl HotkeyOverlay {
         let mut buf = String::new();
         writeln!(&mut buf, "{TITLE}").unwrap();
 
-        for action in actions {
-            let Some((key, action)) = format_bind(&config.binds.0, action) else {
+        for (action, on_release) in actions {
+            let Some((key, action)) = format_bind(&config.binds.0, action, on_release) else {
                 continue;
             };
 
@@ -152,13 +152,13 @@ impl HotkeyOverlay {
     }
 }
 
-fn format_bind(binds: &[Bind], action: &Action) -> Option<(Option<Key>, String)> {
+fn format_bind(binds: &[Bind], action: &Action, on_release: bool) -> Option<(Option<Key>, String)> {
     let mut bind_with_non_null = None;
     let mut bind_with_custom_title = None;
     let mut found_null_title = false;
 
     for bind in binds {
-        if bind.action != *action {
+        if bind.action != *action || bind.on_release != on_release {
             continue;
         }
 
@@ -189,12 +189,15 @@ fn format_bind(binds: &[Bind], action: &Action) -> Option<(Option<Key>, String)>
     } else {
         None
     };
-    let title = title.unwrap_or_else(|| action_name(action));
+    let mut title = title.unwrap_or_else(|| action_name(action));
+    if on_release {
+        title.push_str(" (on release)");
+    }
 
     Some((key, title))
 }
 
-fn collect_actions(config: &Config) -> Vec<&Action> {
+fn collect_actions(config: &Config) -> Vec<(&Action, bool)> {
     let binds = &config.binds.0;
 
     // Collect actions that we want to show.
@@ -301,6 +304,23 @@ fn collect_actions(config: &Config) -> Vec<&Action> {
     }
 
     actions
+        .into_iter()
+        .flat_map(|action| {
+            let has_press = binds
+                .iter()
+                .any(|bind| bind.action == *action && !bind.on_release);
+            let has_release = binds
+                .iter()
+                .any(|bind| bind.action == *action && bind.on_release);
+            // Preserve the unbound placeholder, but don't show one for release-only actions.
+            [
+                (!has_release || has_press).then_some((action, false)),
+                has_release.then_some((action, true)),
+            ]
+            .into_iter()
+            .flatten()
+        })
+        .collect()
 }
 
 fn render(
@@ -323,7 +343,7 @@ fn render(
 
     let strings = collect_actions(config)
         .into_iter()
-        .filter_map(|action| format_bind(&config.binds.0, action))
+        .filter_map(|(action, on_release)| format_bind(&config.binds.0, action, on_release))
         .map(|(key, action)| {
             let key = key.map(|key| key_name(false, mod_key, &key));
             let key = key.as_deref().unwrap_or("(not bound)");
@@ -618,13 +638,70 @@ mod tests {
     #[track_caller]
     fn check(config: &str, action: Action) -> String {
         let config = Config::parse_mem(config).unwrap();
-        if let Some((key, title)) = format_bind(&config.binds.0, &action) {
+        if let Some((key, title)) = format_bind(&config.binds.0, &action, false) {
             let key = key.map(|key| key_name(false, ModKey::Super, &key));
             let key = key.as_deref().unwrap_or("(not bound)");
             format!(" {key} : {title}")
         } else {
             String::from("None")
         }
+    }
+
+    #[test]
+    fn release_bindings_have_distinct_overlay_entries() {
+        let config = Config::parse_mem(
+            r#"binds {
+            Mod+Space hotkey-overlay-title="Press" { spawn "toggle"; }
+            Mod+Space on-release=true hotkey-overlay-title="Release" { spawn "toggle"; }
+        }"#,
+        )
+        .unwrap();
+        let action = Action::Spawn(vec!["toggle".into()]);
+        let phases = collect_actions(&config)
+            .into_iter()
+            .filter(|(candidate, _)| **candidate == action)
+            .map(|(_, phase)| phase)
+            .collect::<Vec<_>>();
+        assert_eq!(phases, vec![false, true]);
+        assert_eq!(
+            format_bind(&config.binds.0, &action, false).unwrap().1,
+            "Press"
+        );
+        assert_eq!(
+            format_bind(&config.binds.0, &action, true).unwrap().1,
+            "Release (on release)"
+        );
+    }
+
+    #[test]
+    fn release_only_overlay_has_no_unbound_press_placeholder() {
+        let config = Config::parse_mem(
+            r#"binds {
+            Mod+Space on-release=true { spawn "stop"; }
+        }"#,
+        )
+        .unwrap();
+        let action = Action::Spawn(vec!["stop".into()]);
+        let phases = collect_actions(&config)
+            .into_iter()
+            .filter(|(candidate, _)| **candidate == action)
+            .map(|(_, phase)| phase)
+            .collect::<Vec<_>>();
+        assert_eq!(phases, vec![true]);
+    }
+
+    #[test]
+    fn hiding_release_title_does_not_hide_press_title() {
+        let config = Config::parse_mem(
+            r#"binds {
+            Mod+Space { spawn "toggle"; }
+            Mod+Space on-release=true hotkey-overlay-title=null { spawn "toggle"; }
+        }"#,
+        )
+        .unwrap();
+        let action = Action::Spawn(vec!["toggle".into()]);
+        assert!(format_bind(&config.binds.0, &action, false).is_some());
+        assert!(format_bind(&config.binds.0, &action, true).is_none());
     }
 
     #[test]

@@ -597,6 +597,7 @@ impl Tty {
             SessionEvent::PauseSession => {
                 debug!("pausing session");
 
+                niri.cancel_keyboard_binds();
                 self.libinput.suspend();
 
                 for device in self.devices.values_mut() {

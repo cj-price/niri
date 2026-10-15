@@ -225,7 +225,12 @@ where
                     let mut config = config.borrow_mut();
                     let binds = &mut config.binds.0;
                     // Remove existing binds matching any new bind.
-                    binds.retain(|bind| !part.0.iter().any(|new| new.key == bind.key));
+                    binds.retain(|bind| {
+                        !part
+                            .0
+                            .iter()
+                            .any(|new| (new.key, new.on_release) == (bind.key, bind.on_release))
+                    });
                     // Add all new binds.
                     binds.extend(part.0);
                 }
@@ -2039,6 +2044,7 @@ mod tests {
                         },
                         action: ToggleKeyboardShortcutsInhibit,
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: false,
@@ -2059,6 +2065,7 @@ mod tests {
                         },
                         action: ToggleKeyboardShortcutsInhibit,
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: false,
@@ -2079,6 +2086,7 @@ mod tests {
                             ],
                         ),
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: true,
                         allow_inhibiting: true,
@@ -2095,6 +2103,7 @@ mod tests {
                         },
                         action: CloseWindow,
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2113,6 +2122,7 @@ mod tests {
                         },
                         action: FocusMonitorLeft,
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2131,6 +2141,7 @@ mod tests {
                             "eDP-1",
                         ),
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2147,6 +2158,7 @@ mod tests {
                         },
                         action: MoveWindowToMonitorRight,
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2165,6 +2177,7 @@ mod tests {
                             "eDP-1",
                         ),
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2183,6 +2196,7 @@ mod tests {
                             "DP-1",
                         ),
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2199,6 +2213,7 @@ mod tests {
                         },
                         action: ConsumeWindowIntoColumn,
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2219,6 +2234,7 @@ mod tests {
                             ),
                         ),
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2239,6 +2255,7 @@ mod tests {
                             ),
                         ),
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2257,6 +2274,7 @@ mod tests {
                             true,
                         ),
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: false,
@@ -2271,6 +2289,7 @@ mod tests {
                         },
                         action: FocusWorkspaceDown,
                         repeat: true,
+                        on_release: false,
                         cooldown: Some(
                             150ms,
                         ),
@@ -2291,6 +2310,7 @@ mod tests {
                             "pkill orca || exec orca",
                         ),
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: true,
                         allow_inhibiting: true,
@@ -2415,6 +2435,7 @@ mod tests {
                             ),
                         },
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2437,6 +2458,7 @@ mod tests {
                             ),
                         },
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
@@ -2461,6 +2483,7 @@ mod tests {
                             ),
                         },
                         repeat: true,
+                        on_release: false,
                         cooldown: None,
                         allow_when_locked: false,
                         allow_inhibiting: true,
