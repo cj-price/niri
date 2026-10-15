@@ -104,6 +104,8 @@ pub struct ResolvedWindowRules {
 
     /// Corner radius to assume this window has.
     pub geometry_corner_radius: Option<CornerRadius>,
+    /// Corner radius to use while the window is not focused.
+    pub inactive_geometry_corner_radius: Option<CornerRadius>,
 
     /// Whether to clip this window to its geometry, including the corner radius.
     pub clip_to_geometry: Option<bool>,
@@ -293,6 +295,9 @@ impl ResolvedWindowRules {
                 }
                 if let Some(x) = rule.geometry_corner_radius {
                     resolved.geometry_corner_radius = Some(x);
+                }
+                if let Some(x) = rule.inactive_geometry_corner_radius {
+                    resolved.inactive_geometry_corner_radius = Some(x);
                 }
                 if let Some(x) = rule.clip_to_geometry {
                     resolved.clip_to_geometry = Some(x);

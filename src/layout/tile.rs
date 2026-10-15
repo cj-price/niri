@@ -55,6 +55,8 @@ pub struct Tile<W: LayoutElement> {
     shadow_fade: DecorationAnimation,
     /// Premultiplied RGBA channels, so transparent colors interpolate correctly.
     shadow_color: [DecorationAnimation; 4],
+    corner_fade: [DecorationAnimation; 4],
+    pub(super) animated_corner_radius: CornerRadius,
 
     /// This tile's current sizing mode.
     ///
@@ -205,6 +207,8 @@ impl<W: LayoutElement> Tile<W> {
             focus_ring_fade: Default::default(),
             shadow_fade: Default::default(),
             shadow_color: Default::default(),
+            corner_fade: Default::default(),
+            animated_corner_radius: Default::default(),
             shadow: Shadow::new(shadow_config),
             sizing_mode,
             fullscreen_backdrop: SolidColorBuffer::new((0., 0.), [0., 0., 0., 1.]),
@@ -429,6 +433,9 @@ impl<W: LayoutElement> Tile<W> {
         for channel in &mut self.shadow_color {
             channel.advance();
         }
+        for corner in &mut self.corner_fade {
+            corner.advance();
+        }
         if let Some(open) = &mut self.open_animation {
             if open.is_done() {
                 self.open_animation = None;
@@ -467,6 +474,7 @@ impl<W: LayoutElement> Tile<W> {
         self.focus_ring_fade.ongoing()
             || self.shadow_fade.ongoing()
             || self.shadow_color.iter().any(DecorationAnimation::ongoing)
+            || self.corner_fade.iter().any(DecorationAnimation::ongoing)
             || self.open_animation.is_some()
             || self.resize_animation.is_some()
             || self.move_x_animation.is_some()
@@ -519,6 +527,35 @@ impl<W: LayoutElement> Tile<W> {
         });
         let color = niri_config::Color::from_array_premul(color);
         let rules = self.window.rules();
+        let active_radius = self.window.geometry_corner_radius();
+        let inactive_radius = rules
+            .inactive_geometry_corner_radius
+            .unwrap_or(active_radius);
+        let target_radius = if is_active {
+            active_radius
+        } else {
+            inactive_radius
+        };
+        let values: [f32; 4] = [
+            target_radius.top_left,
+            target_radius.top_right,
+            target_radius.bottom_right,
+            target_radius.bottom_left,
+        ];
+        let [top_left, top_right, bottom_right, bottom_left] = std::array::from_fn(|i| {
+            self.corner_fade[i].update(f64::from(values[i]), &self.clock, config) as f32
+        });
+        self.animated_corner_radius = CornerRadius {
+            chamfered: target_radius.chamfered,
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
+        };
+        self.rounded_corner_damage.set_corner_radius(
+            self.animated_corner_radius
+                .fit_to(self.window_size().w as f32, self.window_size().h as f32),
+        );
         let animated_tile_size = self.animated_tile_size();
         let expanded_progress = self.expanded_progress();
 
@@ -547,8 +584,7 @@ impl<W: LayoutElement> Tile<W> {
         // Later, when windows get the surface shape protocol with radii, this issue will happen
         // when that changes between animated commits.
         let radius = self
-            .window
-            .geometry_corner_radius()
+            .animated_corner_radius
             .expanded_by(border_width as f32)
             .scaled_by(1. - expanded_progress as f32);
         self.border.update_render_elements(
@@ -568,8 +604,7 @@ impl<W: LayoutElement> Tile<W> {
         let radius = if self.visual_border_width().is_some() {
             radius
         } else {
-            self.window
-                .geometry_corner_radius()
+            self.animated_corner_radius
                 .scaled_by(1. - expanded_progress as f32)
         };
         self.shadow.update_render_elements_with_color(
@@ -1155,8 +1190,7 @@ impl<W: LayoutElement> Tile<W> {
         // that submit a full-sized buffer before acking the fullscreen state (Firefox).
         let clip_to_geometry = fullscreen_progress < 1. && rules.clip_to_geometry == Some(true);
         let radius = self
-            .window
-            .geometry_corner_radius()
+            .animated_corner_radius
             .scaled_by(1. - expanded_progress as f32);
 
         // Popups go on top, whether it's resize or not.
@@ -1331,8 +1365,7 @@ impl<W: LayoutElement> Tile<W> {
             if fullscreen_progress < 1. && has_border_shader {
                 let border_width = self.visual_border_width().unwrap_or(0.);
                 let radius = self
-                    .window
-                    .geometry_corner_radius()
+                    .animated_corner_radius
                     .expanded_by(border_width as f32)
                     .scaled_by(1. - expanded_progress as f32);
 

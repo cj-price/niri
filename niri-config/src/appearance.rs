@@ -142,6 +142,8 @@ pub enum HueInterpolation {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct CornerRadius {
+    /// Draw a straight diagonal in place of each rounded corner.
+    pub chamfered: bool,
     pub top_left: f32,
     pub top_right: f32,
     pub bottom_right: f32,
@@ -150,11 +152,12 @@ pub struct CornerRadius {
 
 impl From<CornerRadius> for [f32; 4] {
     fn from(value: CornerRadius) -> Self {
+        let sign = if value.chamfered { -1. } else { 1. };
         [
-            value.top_left,
-            value.top_right,
-            value.bottom_right,
-            value.bottom_left,
+            value.top_left * sign,
+            value.top_right * sign,
+            value.bottom_right * sign,
+            value.bottom_left * sign,
         ]
     }
 }
@@ -162,6 +165,7 @@ impl From<CornerRadius> for [f32; 4] {
 impl From<f32> for CornerRadius {
     fn from(value: f32) -> Self {
         Self {
+            chamfered: false,
             top_left: value,
             top_right: value,
             bottom_right: value,
@@ -186,6 +190,7 @@ impl CornerRadius {
         let reduction = f32::min(1., reduction);
 
         Self {
+            chamfered: self.chamfered,
             top_left: self.top_left * reduction,
             top_right: self.top_right * reduction,
             bottom_right: self.bottom_right * reduction,
@@ -220,6 +225,7 @@ impl CornerRadius {
 
     pub fn scaled_by(self, scale: f32) -> Self {
         Self {
+            chamfered: self.chamfered,
             top_left: self.top_left * scale,
             top_right: self.top_right * scale,
             bottom_right: self.bottom_right * scale,
@@ -957,6 +963,7 @@ where
         let top_left = decode_radius(ctx, val);
 
         let mut rv = CornerRadius {
+            chamfered: false,
             top_left,
             top_right: top_left,
             bottom_right: top_left,
@@ -986,13 +993,15 @@ where
             }
         }
 
-        // Check for unexpected properties and children.
-        for name in node.properties.keys() {
-            ctx.emit_error(DecodeError::unexpected(
-                name,
-                "property",
-                format!("unexpected property `{}`", name.escape_default()),
-            ));
+        for (name, val) in &node.properties {
+            match &***name {
+                "chamfered" => rv.chamfered = knuffel::traits::DecodeScalar::decode(val, ctx)?,
+                name_str => ctx.emit_error(DecodeError::unexpected(
+                    name,
+                    "property",
+                    format!("unexpected property `{}`", name_str.escape_default()),
+                )),
+            }
         }
         for child in node.children.as_ref().map(|lst| &lst[..]).unwrap_or(&[]) {
             ctx.emit_error(DecodeError::unexpected(

@@ -41,8 +41,11 @@ vec2 erf(vec2 x) {
 
 // Return the blurred mask along the x dimension
 float roundedBoxShadowX(float x, float y, float sigma, float corner, vec2 halfSize) {
-  float delta = min(halfSize.y - corner - abs(y), 0.0);
-  float curved = halfSize.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
+  float radius = abs(corner);
+  float delta = min(halfSize.y - radius - abs(y), 0.0);
+  float curved = corner < 0.0
+      ? halfSize.x + delta
+      : halfSize.x - radius + sqrt(max(0.0, radius * radius - delta * delta));
   vec2 integral = 0.5 + 0.5 * erf((x + vec2(-curved, curved)) * (sqrt(0.5) / sigma));
   return integral.y - integral.x;
 }

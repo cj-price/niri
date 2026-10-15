@@ -878,6 +878,23 @@ This way, you can match GTK 3 applications which have square bottom corners:
 
 ![A screenshot showing a window with only the top corners rounded](./img/different-corner-radius.png)
 
+Set `chamfered=true` to replace rounded corners with diagonal cuts. This shape is
+used by clipping, borders, focus rings, shadows and corner-aware effects. To
+animate the cuts away when the window loses focus, set an inactive radius of 0:
+
+```kdl
+window-rule {
+    geometry-corner-radius 16 chamfered=true
+    inactive-geometry-corner-radius 0 chamfered=true
+    clip-to-geometry true
+}
+```
+
+The focus transition uses the [`decoration-change`](./Configuration:-Animations.md#decoration-change)
+animation. Without `clip-to-geometry`, the window content itself is not cut.
+The inactive radius defaults to the active radius; use the same `chamfered`
+setting on both values for a smooth transition.
+
 #### `clip-to-geometry`
 
 <sup>Since: 0.1.6</sup>

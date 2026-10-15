@@ -214,12 +214,14 @@ impl TabIndicator {
                     // First tab.
                     match position {
                         TabIndicatorPosition::Left | TabIndicatorPosition::Right => CornerRadius {
+                            chamfered: false,
                             top_left: radius,
                             top_right: radius,
                             bottom_right: 0.,
                             bottom_left: 0.,
                         },
                         TabIndicatorPosition::Top | TabIndicatorPosition::Bottom => CornerRadius {
+                            chamfered: false,
                             top_left: radius,
                             top_right: 0.,
                             bottom_right: 0.,
@@ -230,12 +232,14 @@ impl TabIndicator {
                     // Last tab.
                     match position {
                         TabIndicatorPosition::Left | TabIndicatorPosition::Right => CornerRadius {
+                            chamfered: false,
                             top_left: 0.,
                             top_right: 0.,
                             bottom_right: radius,
                             bottom_left: radius,
                         },
                         TabIndicatorPosition::Top | TabIndicatorPosition::Bottom => CornerRadius {
+                            chamfered: false,
                             top_left: 0.,
                             top_right: radius,
                             bottom_right: radius,

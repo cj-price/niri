@@ -468,7 +468,9 @@ animations {
 
 Use `decoration-change { off; }` to make these transitions immediate.
 Interrupted transitions continue from the currently displayed opacity or shadow color.
-Focus-ring colors and decoration geometry changes remain immediate.
+Focus-ring colors and most decoration geometry changes remain immediate. Window
+corner radius changes between `geometry-corner-radius` and
+`inactive-geometry-corner-radius` animate on focus changes.
 
 ### Synchronized Animations
 

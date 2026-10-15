@@ -61,6 +61,8 @@ pub struct WindowRule {
     pub opacity: Option<f32>,
     #[knuffel(child)]
     pub geometry_corner_radius: Option<CornerRadius>,
+    #[knuffel(child)]
+    pub inactive_geometry_corner_radius: Option<CornerRadius>,
     #[knuffel(child, unwrap(argument))]
     pub clip_to_geometry: Option<bool>,
     #[knuffel(child, unwrap(argument))]

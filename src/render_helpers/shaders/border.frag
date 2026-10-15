@@ -221,7 +221,7 @@ void main() {
         if (0.0 <= coords_geo.x && coords_geo.x <= inner_geo_size.x
                 && 0.0 <= coords_geo.y && coords_geo.y <= inner_geo_size.y)
         {
-            vec4 inner_radius = max(outer_radius - vec4(border_width), 0.0);
+            vec4 inner_radius = sign(outer_radius) * max(abs(outer_radius) - vec4(border_width), 0.0);
             color = color * (1.0 - niri_rounding_alpha(coords_geo.xy, inner_geo_size, inner_radius));
         }
     }

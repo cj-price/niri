@@ -1,27 +1,34 @@
+// Negative radii indicate a straight (chamfered) corner. Radii are fitted
+// before reaching this shader, so corner regions never overlap.
 float niri_rounding_alpha(vec2 coords, vec2 size, vec4 corner_radius) {
-    vec2 center;
+    vec4 radii = abs(corner_radius);
+    vec2 local;
     float radius;
+    bool chamfered;
 
-    if (coords.x < corner_radius.x && coords.y < corner_radius.x) {
-        radius = corner_radius.x;
-        center = vec2(radius, radius);
-    } else if (size.x - corner_radius.y < coords.x && coords.y < corner_radius.y) {
-        radius = corner_radius.y;
-        center = vec2(size.x - radius, radius);
-    } else if (size.x - corner_radius.z < coords.x && size.y - corner_radius.z < coords.y) {
-        radius = corner_radius.z;
-        center = vec2(size.x - radius, size.y - radius);
-    } else if (coords.x < corner_radius.w && size.y - corner_radius.w < coords.y) {
-        radius = corner_radius.w;
-        center = vec2(radius, size.y - radius);
+    if (coords.x < radii.x && coords.y < radii.x) {
+        radius = radii.x;
+        local = coords;
+        chamfered = corner_radius.x < 0.0;
+    } else if (size.x - radii.y < coords.x && coords.y < radii.y) {
+        radius = radii.y;
+        local = vec2(size.x - coords.x, coords.y);
+        chamfered = corner_radius.y < 0.0;
+    } else if (size.x - radii.z < coords.x && size.y - radii.z < coords.y) {
+        radius = radii.z;
+        local = size - coords;
+        chamfered = corner_radius.z < 0.0;
+    } else if (coords.x < radii.w && size.y - radii.w < coords.y) {
+        radius = radii.w;
+        local = vec2(coords.x, size.y - coords.y);
+        chamfered = corner_radius.w < 0.0;
     } else {
         return 1.0;
     }
 
-    float dist = distance(coords, center);
-
-    // Manual smoothstep() between radius - half_px and radius + half_px
-    // to avoid a division in clamp().
-    float t = clamp((dist - radius) * niri_scale + 0.5, 0.0, 1.0);
+    float distance_to_edge = chamfered
+        ? (radius - local.x - local.y) * 0.70710678
+        : distance(local, vec2(radius)) - radius;
+    float t = clamp(distance_to_edge * niri_scale + 0.5, 0.0, 1.0);
     return 1.0 - t * t * (3.0 - 2.0 * t);
 }

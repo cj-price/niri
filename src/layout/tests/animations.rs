@@ -109,6 +109,67 @@ fn disabled_shadows_do_not_animate_focus_changes() {
     }
 }
 
+#[test]
+fn chamfered_corners_animate_on_focus_change() {
+    let mut options = make_options();
+    options.animations.window_movement.0.off = true;
+    options.animations.horizontal_view_movement.0.off = true;
+    let rules = ResolvedWindowRules {
+        geometry_corner_radius: Some(CornerRadius {
+            chamfered: true,
+            ..CornerRadius::from(12.)
+        }),
+        inactive_geometry_corner_radius: Some(CornerRadius {
+            chamfered: true,
+            ..CornerRadius::default()
+        }),
+        ..Default::default()
+    };
+    let mut layout = check_ops_with_options(
+        options,
+        [
+            Op::AddOutput(1),
+            Op::AddWindow {
+                params: TestWindowParams {
+                    rules: Some(rules.clone()),
+                    ..TestWindowParams::new(1)
+                },
+            },
+            Op::AddWindow {
+                params: TestWindowParams {
+                    rules: Some(rules),
+                    ..TestWindowParams::new(2)
+                },
+            },
+            Op::CompleteAnimations,
+        ],
+    );
+    layout.update_render_elements(None);
+    let radii = |layout: &Layout<TestWindow>| {
+        let mut tiles = layout
+            .active_workspace()
+            .unwrap()
+            .tiles_with_render_positions()
+            .map(|(tile, _, _)| (tile.window().id(), tile.animated_corner_radius.top_left))
+            .collect::<Vec<_>>();
+        tiles.sort_by_key(|(id, _)| *id);
+        tiles
+            .into_iter()
+            .map(|(_, radius)| radius)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(radii(&layout), [0., 12.]);
+    Op::FocusColumnLeft.apply(&mut layout);
+    layout.update_render_elements(None);
+    assert_eq!(radii(&layout), [0., 12.]);
+    assert!(layout.are_animations_ongoing(None));
+    Op::AdvanceAnimations { msec_delta: 75 }.apply(&mut layout);
+    layout.update_render_elements(None);
+    let radii = radii(&layout);
+    assert!(radii[0] > 0. && radii[0] < 12.);
+    assert!(radii[1] > 0. && radii[1] < 12.);
+}
+
 fn make_options() -> Options {
     const LINEAR: Kind = Kind::Easing(EasingParams {
         duration_ms: 1000,

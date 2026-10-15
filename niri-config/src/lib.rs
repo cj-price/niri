@@ -680,6 +680,22 @@ mod tests {
     }
 
     #[test]
+    fn chamfered_window_corners() {
+        let config = do_parse(
+            r#"window-rule {
+            geometry-corner-radius 12 chamfered=true
+            inactive-geometry-corner-radius 0 chamfered=true
+            clip-to-geometry true
+        }"#,
+        );
+        let rule = &config.window_rules[0];
+        assert_eq!(rule.geometry_corner_radius.unwrap().top_left, 12.);
+        assert!(rule.geometry_corner_radius.unwrap().chamfered);
+        assert_eq!(rule.inactive_geometry_corner_radius.unwrap().top_left, 0.);
+        assert!(rule.inactive_geometry_corner_radius.unwrap().chamfered);
+    }
+
+    #[test]
     fn decoration_change_animation() {
         let config =
             do_parse(r#"animations { decoration-change { duration-ms 230; curve "linear"; }; }"#);
@@ -1917,6 +1933,7 @@ mod tests {
                     draw_border_with_background: None,
                     opacity: None,
                     geometry_corner_radius: None,
+                    inactive_geometry_corner_radius: None,
                     clip_to_geometry: None,
                     baba_is_float: None,
                     block_out_from: None,
